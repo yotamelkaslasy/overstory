@@ -949,6 +949,11 @@ runtime:
   # Falls back to runtime.default when omitted.
   printCommand: claude
 
+  # Delay (ms) between tmux session creation and TUI readiness polling.
+  # Gives slow shells (oh-my-zsh, nvm, pyenv, starship) time to initialize.
+  # Default: 0. Values above 30000 trigger a warning.
+  shellInitDelayMs: 0
+
   # Pi runtime configuration (only used when runtime.default is "pi"
   # or when --runtime pi is passed to ov sling).
   pi:
@@ -959,6 +964,16 @@ runtime:
       opus: anthropic/claude-opus-4-6
       sonnet: anthropic/claude-sonnet-4-6
       haiku: anthropic/claude-haiku-4-5
+
+# Provider configuration for model routing.
+providers:
+  anthropic:
+    type: native
+  # Gateway example:
+  # zai:
+  #   type: gateway
+  #   baseUrl: https://api.z.ai/v1
+  #   authTokenEnv: ZAI_API_KEY
 ```
 
 ### `PiRuntimeConfig` Type
