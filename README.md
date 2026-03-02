@@ -279,6 +279,106 @@ overstory/
   templates/                      Templates for overlays and hooks
 ```
 
+## Configuration
+
+### Gateway Providers
+
+Route agent API calls through custom gateway endpoints (z.ai, OpenRouter, self-hosted proxies). Configure providers in `.overstory/config.yaml`:
+
+```yaml
+providers:
+  anthropic:
+    type: native
+  zai:
+    type: gateway
+    baseUrl: https://api.z.ai/v1
+    authTokenEnv: ZAI_API_KEY
+  openrouter:
+    type: gateway
+    baseUrl: https://openrouter.ai/api/v1
+    authTokenEnv: OPENROUTER_API_KEY
+models:
+  builder: zai/claude-sonnet-4-6
+  scout: openrouter/openai/gpt-4o
+```
+
+**How it works:** Model refs use `provider/model-id` format. Overstory sets `ANTHROPIC_BASE_URL` to the gateway `baseUrl`, `ANTHROPIC_AUTH_TOKEN` from the env var named in `authTokenEnv`, and `ANTHROPIC_API_KEY=""` to prevent direct Anthropic calls. The agent receives `"sonnet"` as a model alias and Claude Code routes via env vars.
+
+**Environment variable notes:**
+- `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_API_KEY` are mutually exclusive per-agent
+- Gateway agents get `ANTHROPIC_API_KEY=""` and `ANTHROPIC_AUTH_TOKEN` from provider config
+- Direct Anthropic API calls (merge resolver, watchdog triage) still need `ANTHROPIC_API_KEY` in the orchestrator env
+
+**Validation:** `ov doctor --category providers` checks reachability, auth tokens, model-provider refs, and tool-use compatibility.
+
+**`ProviderConfig` fields:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `type` | `native` or `gateway` | Yes | Provider type |
+| `baseUrl` | string | Gateway only | API endpoint URL |
+| `authTokenEnv` | string | Gateway only | Env var name holding auth token |
+
+## Troubleshooting
+
+### Coordinator died during startup
+
+This error means the coordinator tmux session exited before the TUI became ready. The most common cause is slow shell initialization.
+
+**Step 1: Measure shell startup time**
+
+```bash
+time zsh -i -c exit   # For zsh
+time bash -i -c exit  # For bash
+```
+
+If startup takes more than 1 second, slow shell init is likely the cause.
+
+**Step 2: Common slow-startup causes**
+
+| Cause | Typical delay | Fix |
+|-------|---------------|-----|
+| oh-my-zsh with many plugins | 1-5s | Reduce plugins, switch to lighter framework (zinit with lazy loading) |
+| nvm (Node Version Manager) | 1-3s | Use `--no-use` + lazy-load nvm, or switch to fnm/volta |
+| pyenv init | 0.5-2s | Lazy-load pyenv |
+| rbenv init | 0.5-1s | Lazy-load rbenv |
+| starship prompt | 0.5-1s | Check starship timings |
+| conda auto-activate | 1-3s | `auto_activate_base: false` in `.condarc` |
+| Homebrew shellenv | 0.5-1s | Cache output instead of evaluating every shell start |
+
+**Step 3: Configure `shellInitDelayMs`** in `.overstory/config.yaml`:
+
+```yaml
+runtime:
+  shellInitDelayMs: 3000
+```
+
+- Default: `0` (no delay)
+- Typical values: `1000`–`5000` depending on shell startup time
+- Values above `30000` (30s) trigger a warning
+- Inserts a delay between tmux session creation and TUI readiness polling
+
+**Step 4: Optimization examples**
+
+Lazy-load nvm (add to `~/.zshrc` or `~/.bashrc`):
+
+```bash
+# Lazy-load nvm — only activates when you first call nvm/node/npm
+export NVM_DIR="$HOME/.nvm"
+nvm() { unset -f nvm node npm npx; [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"; nvm "$@"; }
+node() { unset -f nvm node npm npx; [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"; node "$@"; }
+npm()  { unset -f nvm node npm npx; [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"; npm  "$@"; }
+npx()  { unset -f nvm node npm npx; [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"; npx  "$@"; }
+```
+
+Reduce oh-my-zsh plugins (edit `~/.zshrc`):
+
+```bash
+# Before: plugins=(git zsh-autosuggestions zsh-syntax-highlighting node npm python ruby rbenv pyenv ...)
+# After: keep only what you use regularly
+plugins=(git)
+```
+
 ## Part of os-eco
 
 Overstory is part of the [os-eco](https://github.com/jayminwest/os-eco) AI agent tooling ecosystem.
