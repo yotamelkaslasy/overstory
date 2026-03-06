@@ -66,6 +66,7 @@ interface RunRow {
 	completed_at: string | null;
 	agent_count: number;
 	coordinator_session_id: string | null;
+	coordinator_name: string | null;
 	status: string;
 }
 
@@ -102,12 +103,14 @@ CREATE TABLE IF NOT EXISTS runs (
   completed_at TEXT,
   agent_count INTEGER NOT NULL DEFAULT 0,
   coordinator_session_id TEXT,
+  coordinator_name TEXT,
   status TEXT NOT NULL DEFAULT 'active'
     CHECK(status IN ('active','completed','failed'))
 )`;
 
 const CREATE_RUNS_INDEXES = `
-CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status)`;
+CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
+CREATE INDEX IF NOT EXISTS idx_runs_coordinator ON runs(coordinator_name)`;
 
 /** Convert a database row (snake_case) to an AgentSession object (camelCase). */
 function rowToSession(row: SessionRow): AgentSession {
@@ -140,6 +143,7 @@ function rowToRun(row: RunRow): Run {
 		completedAt: row.completed_at,
 		agentCount: row.agent_count,
 		coordinatorSessionId: row.coordinator_session_id,
+		coordinatorName: row.coordinator_name,
 		status: row.status as RunStatus,
 	};
 }
@@ -421,6 +425,18 @@ export function createSessionStore(dbPath: string): SessionStore {
 }
 
 /**
+ * Migrate an existing runs table to add the coordinator_name column.
+ * Safe to call multiple times — only adds the column if it does not exist.
+ */
+function migrateAddCoordinatorName(db: Database): void {
+	const rows = db.prepare("PRAGMA table_info(runs)").all() as Array<{ name: string }>;
+	const existingColumns = new Set(rows.map((r) => r.name));
+	if (!existingColumns.has("coordinator_name")) {
+		db.exec("ALTER TABLE runs ADD COLUMN coordinator_name TEXT");
+	}
+}
+
+/**
  * Create a new RunStore backed by a SQLite database at the given path.
  *
  * Shares the same sessions.db file as SessionStore. Initializes the runs
@@ -436,6 +452,11 @@ export function createRunStore(dbPath: string): RunStore {
 
 	// Create schema (idempotent — safe if SessionStore already created these)
 	db.exec(CREATE_RUNS_TABLE);
+
+	// Migrate: add coordinator_name column BEFORE creating indexes that reference it.
+	// The migration is a no-op on new databases (column already in CREATE_RUNS_TABLE).
+	migrateAddCoordinatorName(db);
+
 	db.exec(CREATE_RUNS_INDEXES);
 
 	// Prepare statements for frequent operations
@@ -447,11 +468,12 @@ export function createRunStore(dbPath: string): RunStore {
 			$completed_at: string | null;
 			$agent_count: number;
 			$coordinator_session_id: string | null;
+			$coordinator_name: string | null;
 			$status: string;
 		}
 	>(`
-		INSERT INTO runs (id, started_at, completed_at, agent_count, coordinator_session_id, status)
-		VALUES ($id, $started_at, $completed_at, $agent_count, $coordinator_session_id, $status)
+		INSERT INTO runs (id, started_at, completed_at, agent_count, coordinator_session_id, coordinator_name, status)
+		VALUES ($id, $started_at, $completed_at, $agent_count, $coordinator_session_id, $coordinator_name, $status)
 	`);
 
 	const getRunStmt = db.prepare<RunRow, { $id: string }>(`
@@ -460,6 +482,12 @@ export function createRunStore(dbPath: string): RunStore {
 
 	const getActiveRunStmt = db.prepare<RunRow, Record<string, never>>(`
 		SELECT * FROM runs WHERE status = 'active'
+		ORDER BY started_at DESC
+		LIMIT 1
+	`);
+
+	const getActiveRunForCoordinatorStmt = db.prepare<RunRow, { $coordinator_name: string }>(`
+		SELECT * FROM runs WHERE status = 'active' AND coordinator_name = $coordinator_name
 		ORDER BY started_at DESC
 		LIMIT 1
 	`);
@@ -483,6 +511,7 @@ export function createRunStore(dbPath: string): RunStore {
 				$completed_at: null,
 				$agent_count: run.agentCount ?? 0,
 				$coordinator_session_id: run.coordinatorSessionId,
+				$coordinator_name: run.coordinatorName ?? null,
 				$status: run.status,
 			});
 		},
@@ -494,6 +523,11 @@ export function createRunStore(dbPath: string): RunStore {
 
 		getActiveRun(): Run | null {
 			const row = getActiveRunStmt.get({});
+			return row ? rowToRun(row) : null;
+		},
+
+		getActiveRunForCoordinator(coordinatorName: string): Run | null {
+			const row = getActiveRunForCoordinatorStmt.get({ $coordinator_name: coordinatorName });
 			return row ? rowToRun(row) : null;
 		},
 

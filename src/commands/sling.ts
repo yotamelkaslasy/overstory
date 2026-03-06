@@ -593,47 +593,63 @@ export async function slingCommand(taskId: string, opts: SlingOptions): Promise<
 	// 4. Resolve or create run_id for this spawn
 	const overstoryDir = join(config.project.root, ".overstory");
 	const currentRunPath = join(overstoryDir, "current-run.txt");
-	let runId: string;
-
-	const currentRunFile = Bun.file(currentRunPath);
-	if (await currentRunFile.exists()) {
-		runId = (await currentRunFile.text()).trim();
-	} else {
-		runId = `run-${new Date().toISOString().replace(/[:.]/g, "-")}`;
-		const runStore = createRunStore(join(overstoryDir, "sessions.db"));
-		try {
-			runStore.createRun({
-				id: runId,
-				startedAt: new Date().toISOString(),
-				coordinatorSessionId: null,
-				status: "active",
-			});
-		} finally {
-			runStore.close();
-		}
-		await Bun.write(currentRunPath, runId);
-	}
-
-	// 4b. Check per-run session limit
-	if (config.agents.maxSessionsPerRun > 0) {
-		const runCheckStore = createRunStore(join(overstoryDir, "sessions.db"));
-		try {
-			const run = runCheckStore.getRun(runId);
-			if (run && checkRunSessionLimit(config.agents.maxSessionsPerRun, run.agentCount)) {
-				throw new AgentError(
-					`Run session limit reached: ${run.agentCount}/${config.agents.maxSessionsPerRun} agents spawned in run "${runId}". ` +
-						`Increase agents.maxSessionsPerRun in config.yaml or start a new run.`,
-					{ agentName: name },
-				);
-			}
-		} finally {
-			runCheckStore.close();
-		}
-	}
 
 	// 5. Check name uniqueness and concurrency limit against active sessions
+	// (Session store opened here so we can also use it for parent run ID inheritance in step 4.)
 	const { store } = openSessionStore(overstoryDir);
 	try {
+		// 4a. Resolve run ID: inherit from parent → current-run.txt fallback → create new.
+		// Parent inheritance ensures child agents belong to the same run as their coordinator.
+		const runId = await (async (): Promise<string> => {
+			if (parentAgent) {
+				const parentSession = store.getByName(parentAgent);
+				if (parentSession?.runId) {
+					return parentSession.runId;
+				}
+			}
+
+			// Fallback: read current-run.txt (backward compat with single-coordinator setups).
+			const currentRunFile = Bun.file(currentRunPath);
+			if (await currentRunFile.exists()) {
+				const text = (await currentRunFile.text()).trim();
+				if (text) return text;
+			}
+
+			// Create a new run if none exists.
+			const newRunId = `run-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+			const runStore = createRunStore(join(overstoryDir, "sessions.db"));
+			try {
+				runStore.createRun({
+					id: newRunId,
+					startedAt: new Date().toISOString(),
+					coordinatorSessionId: null,
+					coordinatorName: null,
+					status: "active",
+				});
+			} finally {
+				runStore.close();
+			}
+			await Bun.write(currentRunPath, newRunId);
+			return newRunId;
+		})();
+
+		// 4b. Check per-run session limit
+		if (config.agents.maxSessionsPerRun > 0) {
+			const runCheckStore = createRunStore(join(overstoryDir, "sessions.db"));
+			try {
+				const run = runCheckStore.getRun(runId);
+				if (run && checkRunSessionLimit(config.agents.maxSessionsPerRun, run.agentCount)) {
+					throw new AgentError(
+						`Run session limit reached: ${run.agentCount}/${config.agents.maxSessionsPerRun} agents spawned in run "${runId}". ` +
+							`Increase agents.maxSessionsPerRun in config.yaml or start a new run.`,
+						{ agentName: name },
+					);
+				}
+			} finally {
+				runCheckStore.close();
+			}
+		}
+
 		const activeSessions = store.getActive();
 		if (activeSessions.length >= config.agents.maxConcurrent) {
 			throw new AgentError(

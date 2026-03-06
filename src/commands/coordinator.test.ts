@@ -460,6 +460,10 @@ describe("startCoordinator", () => {
 		expect(session?.worktreePath).toBe(tempDir);
 		expect(session?.id).toMatch(/^session-\d+-coordinator$/);
 
+		// Verify the session has a runId set (not null)
+		expect(session?.runId).not.toBeNull();
+		expect(session?.runId).toMatch(/^run-/);
+
 		// Verify tmux createSession was called
 		expect(calls.createSession).toHaveLength(1);
 		expect(calls.createSession[0]?.name).toBe("overstory-test-project-coordinator");
@@ -467,6 +471,67 @@ describe("startCoordinator", () => {
 
 		// Verify sendKeys was called (beacon + follow-up Enter)
 		expect(calls.sendKeys.length).toBeGreaterThanOrEqual(1);
+	});
+
+	test("creates a run record with coordinatorName set", async () => {
+		const { deps } = makeDeps();
+		const originalSleep = Bun.sleep;
+		Bun.sleep = (() => Promise.resolve()) as typeof Bun.sleep;
+
+		try {
+			await captureStdout(() => coordinatorCommand(["start", "--no-attach"], deps));
+		} finally {
+			Bun.sleep = originalSleep;
+		}
+
+		const runStore = createRunStore(join(overstoryDir, "sessions.db"));
+		try {
+			const run = runStore.getActiveRunForCoordinator("coordinator");
+			expect(run).not.toBeNull();
+			expect(run?.coordinatorName).toBe("coordinator");
+			expect(run?.status).toBe("active");
+			expect(run?.coordinatorSessionId).toMatch(/^session-\d+-coordinator$/);
+		} finally {
+			runStore.close();
+		}
+	});
+
+	test("writes current-run.txt for backward compatibility", async () => {
+		const { deps } = makeDeps();
+		const originalSleep = Bun.sleep;
+		Bun.sleep = (() => Promise.resolve()) as typeof Bun.sleep;
+
+		try {
+			await captureStdout(() => coordinatorCommand(["start", "--no-attach"], deps));
+		} finally {
+			Bun.sleep = originalSleep;
+		}
+
+		const currentRunFile = Bun.file(join(overstoryDir, "current-run.txt"));
+		expect(await currentRunFile.exists()).toBe(true);
+		const runId = (await currentRunFile.text()).trim();
+		expect(runId).toMatch(/^run-/);
+	});
+
+	test("run ID in current-run.txt matches session runId", async () => {
+		const { deps } = makeDeps();
+		const originalSleep = Bun.sleep;
+		Bun.sleep = (() => Promise.resolve()) as typeof Bun.sleep;
+
+		try {
+			await captureStdout(() => coordinatorCommand(["start", "--no-attach"], deps));
+		} finally {
+			Bun.sleep = originalSleep;
+		}
+
+		const sessions = loadSessionsFromDb();
+		const session = sessions[0];
+		expect(session?.runId).toBeDefined();
+
+		const currentRunFile = Bun.file(join(overstoryDir, "current-run.txt"));
+		const fileRunId = (await currentRunFile.text()).trim();
+
+		expect(session?.runId).toBe(fileRunId);
 	});
 
 	test("deploys hooks to project root .claude/settings.local.json", async () => {
