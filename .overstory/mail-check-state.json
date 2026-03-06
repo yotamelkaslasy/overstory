@@ -9,7 +9,9 @@
 	"sling-rollback-lead": 1772806485021,
 	"merge-cleanup-lead": 1772806835893,
 	"init-commit-builder": 1772806688503,
-	"coordinator": 1772807053707,
+	"coordinator": 1772811707830,
 	"watchdog-fix-lead": 1772806961528,
-	"fix-uncommitted-state": 1772806896551
+	"fix-uncommitted-state": 1772806896551,
+	"fish-shell-fix": 1772811673235,
+	"fish-tmux-builder": 1772811617635
 }
