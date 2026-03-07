@@ -866,5 +866,15 @@
 		"status": "completed",
 		"createdAt": "2026-03-06T17:27:45.085Z",
 		"completedAt": "2026-03-06T18:00:32.683Z"
+	},
+	{
+		"id": "group-1587724d",
+		"name": "v1-audit-batch",
+		"memberIssueIds": [
+			"overstory-c0a9"
+		],
+		"status": "active",
+		"createdAt": "2026-03-07T14:32:12.397Z",
+		"completedAt": null
 	}
 ]

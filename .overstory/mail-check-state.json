@@ -3,6 +3,10 @@
 	"per-coord-builder": 1772819440894,
 	"per-coord-sessions-lead": 1772820328329,
 	"sd-close-guard-lead": 1772819307567,
-	"coordinator": 1772820290517,
-	"per-coord-fixup": 1772819778864
+	"coordinator": 1772895066206,
+	"per-coord-fixup": 1772819778864,
+	"v1-audit-lead": 1772894939525,
+	"v1-scout-src": 1772894282713,
+	"v1-scout-ops": 1772894481931,
+	"v1-done-builder": 1772894892386
 }
